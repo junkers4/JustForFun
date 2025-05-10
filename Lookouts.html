@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ArcGIS Map with Nearest Features and Fixed Disabled Restaurants</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://js.arcgis.com/4.32/esri/themes/dark/main.css">
+  <script src="https://js.arcgis.com/4.32/"></script>
+  <style>
+    html, body, #viewDiv {
+      padding: 0;
+      margin: 0;
+      height: 100%;
+      width: 100%;
+    }
+    #filterDiv {
+      position: absolute;
+      top: 10px;
+      left: 80px;
+      background-color: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 100;
+    }
+    #nearestFeaturesDiv {
+      position: absolute;
+      top: 50px;
+      right: 10px;
+      background-color: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 100;
+      max-width: 300px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="viewDiv"></div>
+  <div id="filterDiv">
+    <label for="filterSelect">Filter Features: </label>
+    <select id="filterSelect">
+      <option value="all">All Features</option>
+      <option value="restaurants_disabled">Restaurants (Disabled)</option>
+      <option value="restaurants">Restaurants</option>
+      <option value="parking_wheelchair">Parking (Wheelchair)</option>
+    </select>
+  </div>
+  <div id="nearestFeaturesDiv"></div>
+
+  <script>
+    require([
+      "esri/Map",
+      "esri/views/MapView",
+      "esri/layers/FeatureLayer",
+      "esri/widgets/Search",
+      "esri/widgets/Legend",
+      "esri/widgets/LayerList",
+      "esri/widgets/BasemapToggle",
+      "esri/widgets/Home",
+      "esri/widgets/ScaleBar",
+      "esri/geometry/Extent",
+      "esri/geometry/geometryEngine",
+      "esri/Graphic"
+    ], function(Map, MapView, FeatureLayer, Search, Legend, LayerList, BasemapToggle, Home, ScaleBar, Extent, geometryEngine, Graphic) {
+
+      const map = new Map({
+        basemap: "dark-gray"
+      });
+
+      const view = new MapView({
+        container: "viewDiv",
+        map: map,
+        center: [21.2611, 48.7164],
+        zoom: 13
+      });
+
+      // Restaurants Disabled Layer (Points)
+      const restaurantsDisabledLayer = new FeatureLayer({
+        url: "https://services3.arcgis.com/lOWgvXGCzs0MJj0p/ArcGIS/rest/services/allwheelchaiarresutarus/FeatureServer/0",
+        title: "Restaurant Disabled",
+        outFields: ["*"],
+        popupTemplate: {
+          title: "{name}",
+          content: "Wheelchair: {wheelchair}" // Update 'wheelchair' with actual field
+        },
+        renderer: {
+          type: "simple",
+          symbol: {
+            type: "simple-marker",
+            color: "#FF5733",
+            size: 10,
+            outline: { color: "#FFFFFF", width: 1 }
+          }
+        }
+      });
+
+      // Restaurants Layer (Points)
+      const restaurantsLayer = new FeatureLayer({
+        url: "https://services3.arcgis.com/lOWgvXGCzs0MJj0p/arcgis/rest/services/restaurants_all/FeatureServer/0",
+        title: "Restaurant",
+        outFields: ["*"],
+        popupTemplate: {
+          title: "{name}",
+          content: "Cuisine: {cuisine}" // Update 'cuisine' with actual field
+        },
+        renderer: {
+          type: "simple",
+          symbol: {
+            type: "simple-marker",
+            color: "#33FF57",
+            size: 10,
+            outline: { color: "#FFFFFF", width: 1 }
+          }
+        }
+      });
+
+      // Parking Layer (Polygons)
+      const parkingLayer = new FeatureLayer({
+        url: "https://services3.arcgis.com/lOWgvXGCzs0MJj0p/ArcGIS/rest/services/allparking/FeatureServer/0",
+        title: "Parking",
+        outFields: ["*"],
+        popupTemplate: {
+          title: "{name}",
+          content: "Wheelchair: {wheelchair}" // Update 'wheelchair' with actual field
+        },
+        renderer: {
+          type: "simple",
+          symbol: {
+            type: "simple-fill",
+            color: [51, 87, 255, 0.5],
+            outline: { color: "#FFFFFF", width: 1 }
+          }
+        }
+      });
+
+      // Lookouts Layer (Points)
+      const lookoutsLayer = new FeatureLayer({
+        url: "https://services3.arcgis.com/lOWgvXGCzs0MJj0p/ArcGIS/rest/services/ViewPoints_xvascak1_WFL1/FeatureServer/0",
+        title: "Lookouts",
+        outFields: ["*"],
+        popupTemplate: {
+          title: "{name}",
+          content: "Click to find nearest features"
+        },
+        renderer: {
+          type: "simple",
+          symbol: {
+            type: "simple-marker",
+            color: "#FF33A1",
+            size: 10,
+            outline: { color: "#FFFFFF", width: 1 }
+          }
+        }
+      });
+
+      map.addMany([restaurantsDisabledLayer, restaurantsLayer, parkingLayer, lookoutsLayer]);
+
+      // Search Widget
+      const search = new Search({
+        view: view,
+        sources: [
+          {
+            layer: restaurantsDisabledLayer,
+            searchFields: ["name", "wheelchair"], // Update 'wheelchair'
+            displayField: "name",
+            exactMatch: false,
+            outFields: ["*"],
+            name: "Restaurant Disabled",
+            placeholder: "Search accessible restaurants"
+          },
+          {
+            layer: restaurantsLayer,
+            searchFields: ["name", "cuisine"], // Update 'cuisine'
+            displayField: "name",
+            exactMatch: false,
+            outFields: ["*"],
+            name: "Restaurant",
+            placeholder: "Search restaurants"
+          },
+          {
+            layer: parkingLayer,
+            searchFields: ["name", "wheelchair"], // Update 'wheelchair'
+            displayField: "name",
+            exactMatch: false,
+            outFields: ["*"],
+            name: "Parking",
+            placeholder: "Search parking"
+          },
+          {
+            layer: lookoutsLayer,
+            searchFields: ["name"],
+            displayField: "name",
+            exactMatch: false,
+            outFields: ["*"],
+            name: "Lookouts",
+            placeholder: "Search lookouts"
+          }
+        ]
+      });
+
+      view.ui.add(search, "top-right");
+
+      // Legend Widget
+      const legend = new Legend({
+        view: view
+      });
+
+      view.ui.add(legend, "bottom-left");
+
+      // LayerList Widget
+      const layerList = new LayerList({
+        view: view
+      });
+
+      view.ui.add(layerList, "top-left");
+
+      // Basemap Toggle Widget
+      const basemapToggle = new BasemapToggle({
+        view: view,
+        nextBasemap: "satellite"
+      });
+
+      view.ui.add(basemapToggle, "bottom-right");
+
+      // Home Widget
+      const home = new Home({
+        view: view
+      });
+
+      view.ui.add(home, "top-left");
+
+      // ScaleBar Widget
+      const scaleBar = new ScaleBar({
+        view: view,
+        unit: "metric"
+      });
+
+      view.ui.add(scaleBar, "bottom-left");
+
+      // Feature Filter
+      const filterSelect = document.getElementById("filterSelect");
+      filterSelect.addEventListener("change", function(event) {
+        const value = event.target.value;
+        view.graphics.removeAll(); // Clear highlights
+        document.getElementById("nearestFeaturesDiv").style.display = "none"; // Hide nearest features panel
+        if (value === "all") {
+          restaurantsDisabledLayer.definitionExpression = "";
+          restaurantsLayer.definitionExpression = "";
+          parkingLayer.definitionExpression = "";
+          lookoutsLayer.definitionExpression = "";
+        } else if (value === "restaurants_disabled") {
+          restaurantsDisabledLayer.definitionExpression = "wheelchair = 'Yes'"; // Update 'wheelchair' field and 'Yes' value
+          restaurantsLayer.definitionExpression = "1=0";
+          parkingLayer.definitionExpression = "1=0";
+          lookoutsLayer.definitionExpression = "1=0";
+        } else if (value === "restaurants") {
+          restaurantsDisabledLayer.definitionExpression = "1=0";
+          restaurantsLayer.definitionExpression = ""; // Show all restaurants
+          parkingLayer.definitionExpression = "1=0";
+          lookoutsLayer.definitionExpression = "1=0";
+        } else if (value === "parking_wheelchair") {
+          restaurantsDisabledLayer.definitionExpression = "1=0";
+          restaurantsLayer.definitionExpression = "1=0";
+          parkingLayer.definitionExpression = "wheelchair = 'Yes'"; // Update 'wheelchair' field and 'Yes' value
+          lookoutsLayer.definitionExpression = "1=0";
+        }
+      });
+
+      // Click Event for Lookouts
+      view.on("click", async function(event) {
+        view.graphics.removeAll(); // Clear previous highlights
+        const response = await view.hitTest(event);
+        const lookoutGraphic = response.results.find(result => result.graphic.layer === lookoutsLayer);
+        if (lookoutGraphic) {
+          const lookout = lookoutGraphic.graphic;
+          const lookoutPoint = lookout.geometry;
+          const lookoutId = lookout.attributes.OBJECTID; // Assuming OBJECTID is the unique ID
+
+          // Hide all features except the clicked lookout
+          lookoutsLayer.definitionExpression = `OBJECTID = ${lookoutId}`;
+          restaurantsDisabledLayer.definitionExpression = "1=0";
+          restaurantsLayer.definitionExpression = "1=0";
+          parkingLayer.definitionExpression = "1=0";
+
+          // Query nearest features
+          const nearestFeatures = {};
+
+          // Nearest Parking
+          let query = parkingLayer.createQuery();
+          query.geometry = lookoutPoint;
+          query.distance = 5000; // Search within 5km
+          query.units = "meters";
+          query.spatialRelationship = "intersects";
+          query.returnGeometry = true;
+          query.outFields = ["*"];
+          const parkingResult = await parkingLayer.queryFeatures(query);
+          if (parkingResult.features.length > 0) {
+            nearestFeatures.parking = parkingResult.features.reduce((closest, feature) => {
+              const distance = geometryEngine.distance(lookoutPoint, feature.geometry.centroid, "meters");
+              return (!closest || distance < closest.distance) ? { feature, distance } : closest;
+            }, null);
+            parkingLayer.definitionExpression = `OBJECTID = ${nearestFeatures.parking.feature.attributes.OBJECTID}`;
+          }
+
+          // Nearest Wheelchair Parking
+          query = parkingLayer.createQuery();
+          query.geometry = lookoutPoint;
+          query.where = "wheelchair = 'Yes'"; // Update 'wheelchair' field and 'Yes' value
+          query.distance = 5000;
+          query.units = "meters";
+          query.spatialRelationship = "intersects";
+          query.returnGeometry = true;
+          query.outFields = ["*"];
+          const wheelchairParkingResult = await parkingLayer.queryFeatures(query);
+          if (wheelchairParkingResult.features.length > 0) {
+            nearestFeatures.wheelchairParking = wheelchairParkingResult.features.reduce((closest, feature) => {
+              const distance = geometryEngine.distance(lookoutPoint, feature.geometry.centroid, "meters");
+              return (!closest || distance < closest.distance) ? { feature, distance } : closest;
+            }, null);
+            parkingLayer.definitionExpression += nearestFeatures.parking
+              ? ` OR OBJECTID = ${nearestFeatures.wheelchairParking.feature.attributes.OBJECTID}`
+              : `OBJECTID = ${nearestFeatures.wheelchairParking.feature.attributes.OBJECTID}`;
+          }
+
+          // Nearest Restaurant
+          query = restaurantsLayer.createQuery();
+          query.geometry = lookoutPoint;
+          query.distance = 5000;
+          query.units = "meters";
+          query.spatialRelationship = "intersects";
+          query.returnGeometry = true;
+          query.outFields = ["*"];
+          const restaurantResult = await restaurantsLayer.queryFeatures(query);
+          if (restaurantResult.features.length > 0) {
+            nearestFeatures.restaurant = restaurantResult.features.reduce((closest, feature) => {
+              const distance = geometryEngine.distance(lookoutPoint, feature.geometry, "meters");
+              return (!closest || distance < closest.distance) ? { feature, distance } : closest;
+            }, null);
+            restaurantsLayer.definitionExpression = `OBJECTID = ${nearestFeatures.restaurant.feature.attributes.OBJECTID}`;
+          }
+
+          // Nearest Wheelchair Restaurant
+          query = restaurantsDisabledLayer.createQuery();
+          query.geometry = lookoutPoint;
+          query.where = "wheelchair = 'Yes'"; // Update 'wheelchair' field and 'Yes' value
+          query.distance = 5000;
+          query.units = "meters";
+          query.spatialRelationship = "intersects";
+          query.returnGeometry = true;
+          query.outFields = ["*"];
+          const wheelchairRestaurantResult = await restaurantsDisabledLayer.queryFeatures(query);
+          if (wheelchairRestaurantResult.features.length > 0) {
+            nearestFeatures.wheelchairRestaurant = wheelchairRestaurantResult.features.reduce((closest, feature) => {
+              const distance = geometryEngine.distance(lookoutPoint, feature.geometry, "meters");
+              return (!closest || distance < closest.distance) ? { feature, distance } : closest;
+            }, null);
+            restaurantsDisabledLayer.definitionExpression = `OBJECTID = ${nearestFeatures.wheelchairRestaurant.feature.attributes.OBJECTID}`;
+          }
+
+          // Create Nearest Features Panel Content
+          let panelContent = `<b>Nearest Features to ${lookout.attributes.name || 'Unknown'}:</b><ul>`;
+          if (nearestFeatures.parking) {
+            panelContent += `<li><b>Parking</b>: ${nearestFeatures.parking.feature.attributes.name || 'Unknown'} (${Math.round(nearestFeatures.parking.distance)}m)</li>`;
+          } else {
+            panelContent += `<li><b>Parking</b>: None found within 5km</li>`;
+          }
+          if (nearestFeatures.wheelchairParking) {
+            panelContent += `<li><b>Wheelchair Parking</b>: ${nearestFeatures.wheelchairParking.feature.attributes.name || 'Unknown'} (${Math.round(nearestFeatures.wheelchairParking.distance)}m)</li>`;
+          } else {
+            panelContent += `<li><b>Wheelchair Parking</b>: None found within 5km</li>`;
+          }
+          if (nearestFeatures.restaurant) {
+            panelContent += `<li><b>Restaurant</b>: ${nearestFeatures.restaurant.feature.attributes.name || 'Unknown'} (${Math.round(nearestFeatures.restaurant.distance)}m)</li>`;
+          } else {
+            panelContent += `<li><b>Restaurant</b>: None found within 5km</li>`;
+          }
+          if (nearestFeatures.wheelchairRestaurant) {
+            panelContent += `<li><b>Wheelchair Restaurant</b>: ${nearestFeatures.wheelchairRestaurant.feature.attributes.name || 'Unknown'} (${Math.round(nearestFeatures.wheelchairRestaurant.distance)}m)</li>`;
+          } else {
+            panelContent += `<li><b>Wheelchair Restaurant</b>: None found within 5km</li>`;
+          }
+          panelContent += `</ul>`;
+
+          // Update Nearest Features Panel
+          const nearestFeaturesDiv = document.getElementById("nearestFeaturesDiv");
+          nearestFeaturesDiv.innerHTML = panelContent;
+          nearestFeaturesDiv.style.display = "block";
+
+          // Highlight Nearest Features
+          const highlightSymbolPoint = {
+            type: "simple-marker",
+            color: "#FFFF00",
+            size: 12,
+            outline: { color: "#000000", width: 1 }
+          };
+          const highlightSymbolPolygon = {
+            type: "simple-fill",
+            color: [255, 255, 0, 0.3],
+            outline: { color: "#FFFF00", width: 2 }
+          };
+
+          if (nearestFeatures.parking) {
+            view.graphics.add(new Graphic({
+              geometry: nearestFeatures.parking.feature.geometry.centroid,
+              symbol: highlightSymbolPoint
+            }));
+          }
+          if (nearestFeatures.wheelchairParking) {
+            view.graphics.add(new Graphic({
+              geometry: nearestFeatures.wheelchairParking.feature.geometry,
+              symbol: highlightSymbolPolygon
+            }));
+          }
+          if (nearestFeatures.restaurant) {
+            view.graphics.add(new Graphic({
+              geometry: nearestFeatures.restaurant.feature.geometry,
+              symbol: highlightSymbolPoint
+            }));
+          }
+          if (nearestFeatures.wheelchairRestaurant) {
+            view.graphics.add(new Graphic({
+              geometry: nearestFeatures.wheelchairRestaurant.feature.geometry,
+              symbol: highlightSymbolPoint
+            }));
+          }
+
+          // Open Popup
+          view.popup.open({
+            title: `Lookout: ${lookout.attributes.name || 'Unknown'}`,
+            content: "Nearest features shown in panel (top-right)",
+            location: lookoutPoint
+          });
+        }
+      });
+
+      // Zoom to combined extent
+      view.when(function() {
+        Promise.all([
+          restaurantsDisabledLayer.when(),
+          restaurantsLayer.when(),
+          parkingLayer.when(),
+          lookoutsLayer.when()
+        ]).then(function([disabled, restaurants, parking, lookouts]) {
+          const extents = [
+            disabled.fullExtent,
+            restaurants.fullExtent,
+            parking.fullExtent,
+            lookouts.fullExtent
+          ].filter(extent => extent);
+          if (extents.length > 0) {
+            const combinedExtent = Extent.union(extents);
+            view.goTo(combinedExtent).catch(function(error) {
+              console.error("Error zooming to combined extent:", error);
+            });
+          }
+        });
+      });
+    });
+  </script>
+</body>
+</html>
