@@ -137,8 +137,8 @@
 
       // OSRM Route Function
       async function findRouteAlongPaths(startPoint, endPoint) {
-        console.log("OSRM: Start point:", startPoint);
-        console.log("OSRM: End point:", endPoint);
+        console.log("OSRM: Start point:", { x: startPoint.x, y: startPoint.y });
+        console.log("OSRM: End point:", { x: endPoint.x, y: endPoint.y });
         const url = `http://router.project-osrm.org/route/v1/walking/${startPoint.x},${startPoint.y};${endPoint.x},${endPoint.y}?overview=full&geometries=geojson`;
         console.log("OSRM: Request URL:", url);
         try {
@@ -188,23 +188,32 @@
             authNamespace: "/sharing/rest"
           });
 
-          console.log("OAuthInfo configured:", oauthInfo);
+          console.log("OAuthInfo configured:", {
+            appId: oauthInfo.appId,
+            portalUrl: oauthInfo.portalUrl,
+            popup: oauthInfo.popup,
+            redirectUri: oauthInfo.redirectUri,
+            popupCallbackUrl: oauthInfo.popupCallbackUrl
+          });
 
           IdentityManager.registerOAuthInfos([oauthInfo]);
           console.log("OAuthInfo registered");
 
           // Test popup support
+          console.log("Testing popup support...");
           const testPopup = window.open("", "_blank", "width=600,height=400");
           if (!testPopup) {
             console.warn("Popup blocked by browser. Falling back to new window.");
-            alert("Please allow popups for this site to enable a better login experience.");
+            alert("Please allow popups for this site to enable a better login experience. Check your browser's address bar or settings.");
           } else {
             testPopup.close();
             console.log("Popup supported by browser.");
           }
 
+          console.log("Initiating credential request...");
           IdentityManager.getCredential(portalUrl + "/sharing/rest", {
-            oAuthPopupConfirmation: false
+            oAuthPopupConfirmation: false,
+            retryOnFailure: true
           }).then(function(credential) {
             console.log("User is signed in:", credential);
             document.getElementById("authDiv").style.display = "none";
