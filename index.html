@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>ArcGIS Map with Radius Search for All Features</title>
+  <title>ArcGIS Map with Authenticated Route Service</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="https://js.arcgis.com/4.32/esri/themes/dark/main.css">
   <script src="https://js.arcgis.com/4.32/"></script>
@@ -13,10 +13,23 @@
       height: 100%;
       width: 100%;
     }
-    #filterDiv {
+    #authDiv {
       position: absolute;
       top: 10px;
-      left: 80px;
+      left: 10px;
+      background-color: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 100;
+    }
+    #authDiv input, #authDiv button {
+      margin: 5px;
+    }
+    #filterDiv {
+      position: absolute;
+      top: 60px;
+      left: 10px;
       background-color: rgba(0, 0, 0, 0.8);
       color: white;
       padding: 10px;
@@ -38,10 +51,30 @@
     #radiusSearchDiv button {
       margin-left: 5px;
     }
+    #routePanel {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background-color: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 100;
+      width: 200px;
+    }
+    #routePanel select, #routePanel button {
+      width: 100%;
+      margin-bottom: 5px;
+    }
   </style>
 </head>
 <body>
   <div id="viewDiv"></div>
+  <div id="authDiv">
+    <label for="clientIdInput">Client ID: </label>
+    <input type="text" id="clientIdInput" placeholder="Enter Client ID">
+    <button id="loginButton">Login</button>
+  </div>
   <div id="filterDiv">
     <label for="filterSelect">Filter Features: </label>
     <select id="filterSelect">
@@ -62,6 +95,12 @@
     <button id="searchButton">Search</button>
     <button id="endButton">End</button>
   </div>
+  <div id="routePanel">
+    <label>Selected Lookout: <span id="selectedLookoutName"></span></label>
+    <label>Selected Parking: <span id="selectedParkingName"></span></label>
+    <button id="drawRouteButton">Draw Route</button>
+    <button id="clearRouteButton">Clear Route</button>
+  </div>
 
   <script>
     require([
@@ -79,9 +118,20 @@
       "esri/geometry/geometryEngine",
       "esri/Graphic",
       "esri/geometry/Circle",
-      "esri/geometry/Point"
-    ], function(Map, MapView, FeatureLayer, GraphicsLayer, Search, Legend, LayerList, BasemapToggle, Home, ScaleBar, Extent, geometryEngine, Graphic, Circle, Point) {
+      "esri/geometry/Polyline",
+      "esri/geometry/Point",
+      "esri/tasks/RouteTask",
+      "esri/tasks/support/RouteParameters",
+      "esri/tasks/support/FeatureSet",
+      "esri/identity/IdentityManager",
+      "esri/identity/OAuthInfo"
+    ], function(Map, MapView, FeatureLayer, GraphicsLayer, Search, Legend, LayerList, BasemapToggle, Home, ScaleBar, Extent, geometryEngine, Graphic, Circle, Polyline, Point, RouteTask, RouteParameters, FeatureSet, IdentityManager, OAuthInfo) {
 
+      const portalUrl = "https://mendelu.maps.arcgis.com";
+      const redirectUri = "http://localhost:8080"; // Update to your local server or app URL
+      let oauthInfo = null;
+
+      // Initialize map without immediate authentication
       const map = new Map({
         basemap: "dark-gray"
       });
@@ -93,9 +143,9 @@
         zoom: 13
       });
 
-      // Graphics Layer for search results
+      // Graphics Layer for search results and routes
       const searchGraphicsLayer = new GraphicsLayer({
-        title: "Search Results"
+        title: "Search Results and Routes"
       });
       map.add(searchGraphicsLayer);
 
@@ -262,11 +312,41 @@
 
       view.ui.add(scaleBar, "bottom-left");
 
+      // Login Button Event
+      document.getElementById("loginButton").addEventListener("click", function() {
+        const clientId = document.getElementById("clientIdInput").value.trim();
+        if (!clientId) {
+          alert("Please enter a valid Client ID.");
+          return;
+        }
+
+        // Configure OAuth2 authentication
+        oauthInfo = new OAuthInfo({
+          appId: clientId,
+          portalUrl: portalUrl,
+          popup: true,
+          redirectUri: redirectUri,
+          authNamespace: "/sharing/rest"
+        });
+
+        IdentityManager.registerOAuthInfos([oauthInfo]);
+
+        // Trigger login
+        IdentityManager.getCredential(portalUrl + "/sharing/rest", { oAuthPopupConfirmation: false })
+          .then(function() {
+            console.log("User is signed in.");
+            document.getElementById("authDiv").style.display = "none"; // Hide login panel after successful login
+          })
+          .catch(function(error) {
+            console.error("Login failed:", error);
+            alert("Login failed. Please check the Client ID and try again.");
+          });
+      });
+
       // Feature Filter
       const filterSelect = document.getElementById("filterSelect");
       filterSelect.addEventListener("change", function(event) {
         const value = event.target.value;
-        searchGraphicsLayer.removeAll();
         document.getElementById("radiusSearchDiv").style.display = "none";
         view.popup.close();
         if (value === "all") {
@@ -286,31 +366,89 @@
           lookoutsLayer.visible = false;
         } else if (value === "parking_wheelchair") {
           restaurantsDisabledLayer.visible = false;
-          restaurantsLayer.visible = false;
+          restaurantsLayer.visible = true;
           parkingLayer.visible = true;
           lookoutsLayer.visible = false;
         }
       });
 
-      // Click Event for Lookouts
+      // Variables for selection and end button click counter
       let selectedLookout = null;
+      let selectedParking = null;
+      let endClickCount = 0;
+
+      // Initialize RouteTask with ArcGIS Online routing service
+      const routeTask = new RouteTask({
+        url: "https://route-api.arcgis.com/arcgis/rest/services/World/Route/NAServer/Route_World"
+      });
+
+      // Find route using ArcGIS Route Service
+      async function findRouteAlongPaths(startPoint, endPoint) {
+        console.log("Finding route between:", startPoint, endPoint);
+        const routeParams = new RouteParameters({
+          stops: new FeatureSet({
+            features: [
+              new Graphic({
+                geometry: new Point({
+                  x: startPoint.x,
+                  y: startPoint.y,
+                  spatialReference: startPoint.spatialReference
+                })
+              }),
+              new Graphic({
+                geometry: new Point({
+                  x: endPoint.x,
+                  y: endPoint.y,
+                  spatialReference: endPoint.spatialReference
+                })
+              })
+            ]
+          }),
+          returnDirections: false,
+          returnRoutes: true,
+          findBestSequence: false,
+          preserveFirstStop: true,
+          preserveLastStop: true,
+          directionsLanguage: "en",
+          outputLines: "true-shape",
+          travelMode: "Walking Time"
+        });
+
+        try {
+          const result = await routeTask.solve(routeParams);
+          console.log("Route result:", result);
+          if (result.routeResults.length > 0) {
+            const routeGeometry = result.routeResults[0].route.geometry;
+            return routeGeometry;
+          } else {
+            throw new Error("No route found.");
+          }
+        } catch (error) {
+          console.error("Route service error:", error);
+          throw error;
+        }
+      }
+
+      // Click Event for Lookouts and Parking
       view.on("click", async function(event) {
         searchGraphicsLayer.removeAll();
         const response = await view.hitTest(event);
         const lookoutGraphic = response.results.find(result => result.graphic.layer === lookoutsLayer);
+        const parkingGraphic = response.results.find(result => result.graphic.layer === parkingLayer);
+
         if (lookoutGraphic) {
           selectedLookout = lookoutGraphic.graphic;
-          const lookoutPoint = selectedLookout.geometry;
-
-          // Show Radius Search UI
+          endClickCount = 0;
           document.getElementById("radiusSearchDiv").style.display = "block";
-
-          // Open Popup
+          document.getElementById("selectedLookoutName").textContent = selectedLookout.attributes.name || `Lookout ${selectedLookout.attributes.OBJECTID}`;
           view.popup.open({
             title: `Lookout: ${selectedLookout.attributes.name || 'Unknown'}`,
             content: "Select a radius and click Search to show nearby features",
-            location: lookoutPoint
+            location: selectedLookout.geometry
           });
+        } else if (parkingGraphic) {
+          selectedParking = parkingGraphic.graphic;
+          document.getElementById("selectedParkingName").textContent = selectedParking.attributes.name || `Parking ${selectedParking.attributes.OBJECTID}`;
         }
       });
 
@@ -320,16 +458,12 @@
         const lookoutPoint = selectedLookout.geometry;
         const radius = parseInt(document.getElementById("radiusSelect").value);
 
-        // Clear previous graphics
         searchGraphicsLayer.removeAll();
-
-        // Hide all feature layers except lookouts
         restaurantsDisabledLayer.visible = false;
         restaurantsLayer.visible = false;
         parkingLayer.visible = false;
         lookoutsLayer.visible = false;
 
-        // Create radius circle graphic
         const circle = new Circle({
           center: lookoutPoint,
           radius: radius,
@@ -345,7 +479,6 @@
         });
         searchGraphicsLayer.add(circleGraphic);
 
-        // Add selected lookout graphic
         const lookoutGraphic = new Graphic({
           geometry: lookoutPoint,
           symbol: {
@@ -362,13 +495,11 @@
         });
         searchGraphicsLayer.add(lookoutGraphic);
 
-        // Helper function to check if a feature is within the radius
         const isWithinRadius = (featureGeometry, centerPoint, radiusMeters) => {
           const distance = geometryEngine.distance(centerPoint, featureGeometry, "meters");
           return distance <= radiusMeters;
         };
 
-        // Query Restaurants Disabled
         let query = restaurantsDisabledLayer.createQuery();
         query.geometry = circle;
         query.spatialRelationship = "intersects";
@@ -395,7 +526,6 @@
           }
         });
 
-        // Query Restaurants
         query = restaurantsLayer.createQuery();
         query.geometry = circle;
         query.spatialRelationship = "intersects";
@@ -422,7 +552,6 @@
           }
         });
 
-        // Query Parking
         query = parkingLayer.createQuery();
         query.geometry = circle;
         query.spatialRelationship = "intersects";
@@ -430,7 +559,6 @@
         query.outFields = ["*"];
         const parkingResult = await parkingLayer.queryFeatures(query);
         parkingResult.features.forEach(feature => {
-          // For polygons, use the centroid to calculate distance
           const centroid = feature.geometry.centroid || feature.geometry;
           if (isWithinRadius(centroid, lookoutPoint, radius)) {
             const graphic = new Graphic({
@@ -450,7 +578,6 @@
           }
         });
 
-        // Query Lookouts (to ensure no other lookouts are shown)
         query = lookoutsLayer.createQuery();
         query.geometry = circle;
         query.spatialRelationship = "intersects";
@@ -458,7 +585,7 @@
         query.outFields = ["*"];
         const lookoutResult = await lookoutsLayer.queryFeatures(query);
         lookoutResult.features.forEach(feature => {
-          if (feature.attributes.OBJECTID === selectedLookout.attributes.OBJECTID) return; // Skip the selected lookout
+          if (feature.attributes.OBJECTID === selectedLookout.attributes.OBJECTID) return;
           if (isWithinRadius(feature.geometry, lookoutPoint, radius)) {
             const graphic = new Graphic({
               geometry: feature.geometry,
@@ -478,24 +605,136 @@
           }
         });
 
-        // Update Popup
         view.popup.open({
           title: `Lookout: ${selectedLookout.attributes.name || 'Unknown'}`,
           content: `Features within ${radius}m shown on map`,
           location: lookoutPoint
         });
 
-        // Zoom to radius extent
         view.goTo(circle);
       });
 
-      // End Button Event
+      // End Button Event with Double-Click Logic
       document.getElementById("endButton").addEventListener("click", function() {
-        selectedLookout = null;
+        endClickCount++;
         searchGraphicsLayer.removeAll();
-        document.getElementById("radiusSearchDiv").style.display = "none";
         view.popup.close();
-        // Restore all layers
+        restaurantsDisabledLayer.visible = true;
+        restaurantsLayer.visible = true;
+        parkingLayer.visible = true;
+        lookoutsLayer.visible = true;
+
+        if (endClickCount >= 2) {
+          document.getElementById("radiusSearchDiv").style.display = "none";
+          endClickCount = 0;
+        } else {
+          document.getElementById("radiusSearchDiv").style.display = "block";
+        }
+      });
+
+      // Draw Route Button Event
+      document.getElementById("drawRouteButton").addEventListener("click", async function() {
+        if (!selectedLookout || !selectedParking) {
+          alert("Please select both a lookout and a parking spot by clicking on the map.");
+          return;
+        }
+
+        const lookoutPoint = selectedLookout.geometry;
+        const parkingCentroid = selectedParking.geometry.centroid || selectedParking.geometry;
+
+        try {
+          const routeGeometry = await findRouteAlongPaths(parkingCentroid, lookoutPoint);
+
+          const routeGraphic = new Graphic({
+            geometry: routeGeometry,
+            symbol: {
+              type: "simple-line",
+              color: [255, 0, 0, 0.8],
+              width: 2
+            }
+          });
+
+          searchGraphicsLayer.removeAll();
+          searchGraphicsLayer.add(routeGraphic);
+
+          const parkingGraphic = new Graphic({
+            geometry: parkingCentroid,
+            symbol: {
+              type: "simple-marker",
+              color: [51, 87, 255],
+              size: 10,
+              outline: { color: "#FFFFFF", width: 1 }
+            }
+          });
+          const lookoutGraphic = new Graphic({
+            geometry: lookoutPoint,
+            symbol: {
+              type: "simple-marker",
+              color: "#FF33A1",
+              size: 10,
+              outline: { color: "#FFFFFF", width: 1 }
+            }
+          });
+          searchGraphicsLayer.add(parkingGraphic);
+          searchGraphicsLayer.add(lookoutGraphic);
+
+          view.goTo(routeGeometry);
+        } catch (error) {
+          console.error("Error finding path:", error);
+          alert("No path found. Using straight line as fallback.");
+
+          const polyline = new Polyline({
+            paths: [
+              [parkingCentroid.x, parkingCentroid.y],
+              [lookoutPoint.x, lookoutPoint.y]
+            ],
+            spatialReference: view.spatialReference
+          });
+
+          const routeGraphic = new Graphic({
+            geometry: polyline,
+            symbol: {
+              type: "simple-line",
+              color: [255, 0, 0, 0.8],
+              width: 2
+            }
+          });
+
+          searchGraphicsLayer.removeAll 
+          searchGraphicsLayer.add(routeGraphic);
+          searchGraphicsLayer.add(new Graphic({
+            geometry: parkingCentroid,
+            symbol: {
+              type: "simple-marker",
+              color: [51, 87, 255],
+              size: 10,
+              outline: { color: "#FFFFFF", width: 1 }
+            }
+          }));
+          searchGraphicsLayer.add(new Graphic({
+            geometry: lookoutPoint,
+            symbol: {
+              type: "simple-marker",
+              color: "#FF33A1",
+              size: 10,
+              outline: { color: "#FFFFFF", width: 1 }
+            }
+          }));
+
+          view.goTo(polyline);
+        }
+
+        document.getElementById("selectedLookoutName").textContent = selectedLookout.attributes.name || `Lookout ${selectedLookout.attributes.OBJECTID}`;
+        document.getElementById("selectedParkingName").textContent = selectedParking.attributes.name || `Parking ${selectedParking.attributes.OBJECTID}`;
+      });
+
+      // Clear Route Button Event
+      document.getElementById("clearRouteButton").addEventListener("click", function() {
+        searchGraphicsLayer.removeAll();
+        selectedLookout = null;
+        selectedParking = null;
+        document.getElementById("selectedLookoutName").textContent = "";
+        document.getElementById("selectedParkingName").textContent = "";
         restaurantsDisabledLayer.visible = true;
         restaurantsLayer.visible = true;
         parkingLayer.visible = true;
