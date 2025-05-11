@@ -137,19 +137,27 @@
 
       // OSRM Route Function
       async function findRouteAlongPaths(startPoint, endPoint) {
-        console.log("Finding OSRM route between:", startPoint, endPoint);
+        console.log("OSRM: Start point:", startPoint);
+        console.log("OSRM: End point:", endPoint);
         const url = `http://router.project-osrm.org/route/v1/walking/${startPoint.x},${startPoint.y};${endPoint.x},${endPoint.y}?overview=full&geometries=geojson`;
+        console.log("OSRM: Request URL:", url);
         try {
           const response = await fetch(url);
+          console.log("OSRM: Response status:", response.status);
+          if (!response.ok) {
+            throw new Error(`OSRM HTTP error: ${response.status}`);
+          }
           const data = await response.json();
+          console.log("OSRM: Response data:", data);
           if (data.routes && data.routes.length > 0) {
             const coordinates = data.routes[0].geometry.coordinates.map(coord => [coord[0], coord[1]]);
+            console.log("OSRM: Route coordinates:", coordinates);
             return new Polyline({
               paths: [coordinates],
               spatialReference: view.spatialReference
             });
           }
-          throw new Error("No route found.");
+          throw new Error("OSRM: No routes found in response.");
         } catch (error) {
           console.error("OSRM route error:", error);
           throw error;
@@ -217,13 +225,16 @@
 
       // Click Event for Lookouts and Parking
       view.on("click", async function(event) {
+        console.log("Map clicked at:", event.mapPoint);
         graphicsLayer.removeAll();
         const response = await view.hitTest(event);
+        console.log("Hit test response:", response.results);
         const lookoutGraphic = response.results.find(result => result.graphic.layer === lookoutsLayer);
         const parkingGraphic = response.results.find(result => result.graphic.layer === parkingLayer);
 
         if (lookoutGraphic) {
           selectedLookout = lookoutGraphic.graphic;
+          console.log("Selected lookout:", selectedLookout.attributes);
           document.getElementById("selectedLookoutName").textContent = selectedLookout.attributes.name || `Lookout ${selectedLookout.attributes.OBJECTID}`;
           view.popup.open({
             title: `Lookout: ${selectedLookout.attributes.name || 'Unknown'}`,
@@ -232,10 +243,13 @@
           });
         } else if (parkingGraphic && selectedLookout) {
           selectedParking = parkingGraphic.graphic;
+          console.log("Selected parking:", selectedParking.attributes);
           document.getElementById("selectedParkingName").textContent = selectedParking.attributes.name || `Parking ${selectedParking.attributes.OBJECTID}`;
 
           const lookoutPoint = selectedLookout.geometry;
           const parkingCentroid = selectedParking.geometry.centroid || selectedParking.geometry;
+          console.log("Lookout point:", lookoutPoint);
+          console.log("Parking centroid:", parkingCentroid);
 
           try {
             const routeGeometry = await findRouteAlongPaths(parkingCentroid, lookoutPoint);
@@ -274,6 +288,7 @@
             graphicsLayer.add(lookoutGraphic);
 
             view.goTo(routeGeometry);
+            console.log("Route drawn successfully");
           } catch (error) {
             console.error("Error finding route:", error);
             alert("No route found. Drawing straight line as fallback.");
@@ -320,12 +335,14 @@
             graphicsLayer.add(lookoutGraphic);
 
             view.goTo(polyline);
+            console.log("Fallback straight line drawn");
           }
         }
       });
 
       // Clear Button Event
       document.getElementById("clearRouteButton").addEventListener("click", function() {
+        console.log("Clear button clicked");
         graphicsLayer.removeAll();
         selectedLookout = null;
         selectedParking = null;
@@ -335,6 +352,7 @@
 
       // Zoom to combined extent
       view.when(function() {
+        console.log("Map view ready, zooming to extent");
         Promise.all([
           lookoutsLayer.when(),
           parkingLayer.when()
