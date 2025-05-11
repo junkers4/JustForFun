@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>ArcGIS Map - Minimal Test</title>
+  <title>ArcGIS Map with Routing</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="https://js.arcgis.com/4.31/esri/themes/dark/main.css">
   <script src="https://js.arcgis.com/4.31/"></script>
@@ -65,10 +65,14 @@
       "esri/Graphic",
       "esri/geometry/Polyline",
       "esri/geometry/Point",
+      "esri/tasks/RouteTask",
+      "esri/tasks/support/RouteParameters",
+      "esri/tasks/support/FeatureSet",
       "esri/identity/IdentityManager",
       "esri/identity/OAuthInfo"
     ], function(
-      Map, MapView, FeatureLayer, GraphicsLayer, Graphic, Polyline, Point, IdentityManager, OAuthInfo
+      Map, MapView, FeatureLayer, GraphicsLayer, Graphic, Polyline, Point,
+      RouteTask, RouteParameters, FeatureSet, IdentityManager, OAuthInfo
     ) {
       console.log("ArcGIS API modules loaded successfully");
 
@@ -88,9 +92,9 @@
         zoom: 13
       });
 
-      // Graphics Layer for lines
+      // Graphics Layer for routes
       const graphicsLayer = new GraphicsLayer({
-        title: "Lines"
+        title: "Routes"
       });
       map.add(graphicsLayer);
 
@@ -101,7 +105,7 @@
         outFields: ["*"],
         popupTemplate: {
           title: "{name}",
-          content: "Click a parking spot to draw a line."
+          content: "Click a parking spot to draw a route."
         },
         renderer: {
           type: "simple",
@@ -135,6 +139,56 @@
 
       map.addMany([lookoutsLayer, parkingLayer]);
 
+      // Initialize RouteTask
+      const routeTask = new RouteTask({
+        url: "https://route-api.arcgis.com/arcgis/rest/services/World/Route/NAServer/Route_World"
+      });
+
+      // Find route using ArcGIS Route Service
+      async function findRouteAlongPaths(startPoint, endPoint) {
+        console.log("Finding route between:", startPoint, endPoint);
+        const routeParams = new RouteParameters({
+          stops: new FeatureSet({
+            features: [
+              new Graphic({
+                geometry: new Point({
+                  x: startPoint.x,
+                  y: startPoint.y,
+                  spatialReference: startPoint.spatialReference
+                })
+              }),
+              new Graphic({
+                geometry: new Point({
+                  x: endPoint.x,
+                  y: endPoint.y,
+                  spatialReference: endPoint.spatialReference
+                })
+              })
+            ]
+          }),
+          returnDirections: true,
+          returnRoutes: true,
+          findBestSequence: false,
+          preserveFirstStop: true,
+          preserveLastStop: true,
+          directionsLanguage: "en",
+          outputLines: "true-shape",
+          travelMode: "Walking Time"
+        });
+
+        try {
+          const result = await routeTask.solve(routeParams);
+          console.log("Route result:", result);
+          if (result.routeResults.length > 0) {
+            return result.routeResults[0].route.geometry;
+          }
+          throw new Error("No route found.");
+        } catch (error) {
+          console.error("Route service error:", error);
+          throw error;
+        }
+      }
+
       // Login Button Event
       document.getElementById("loginButton").addEventListener("click", function() {
         console.log("Login button clicked");
@@ -155,7 +209,7 @@
             portalUrl: portalUrl,
             popup: true,
             redirectUri: redirectUri,
-            popupCallbackUrl: redirectUri, // Explicitly set to index.html
+            popupCallbackUrl: redirectUri, // Ensure callback goes to index.html
             authNamespace: "/sharing/rest"
           });
 
@@ -164,12 +218,22 @@
           IdentityManager.registerOAuthInfos([oauthInfo]);
           console.log("OAuthInfo registered");
 
+          // Check for popup support
+          const testPopup = window.open("", "_blank", "width=600,height=400");
+          if (!testPopup) {
+            console.warn("Popup blocked by browser. Falling back to new window.");
+            alert("Please allow popups for this site to enable a better login experience.");
+          } else {
+            testPopup.close();
+            console.log("Popup supported by browser.");
+          }
+
           IdentityManager.getCredential(portalUrl + "/sharing/rest", {
             oAuthPopupConfirmation: false
           }).then(function(credential) {
             console.log("User is signed in:", credential);
             document.getElementById("authDiv").style.display = "none";
-            alert("Login successful!");
+            alert("Login successful! You can now use routing.");
           }).catch(function(error) {
             console.error("Login failed:", error);
             alert("Login failed: " + error.message);
@@ -184,7 +248,7 @@
       let selectedLookout = null;
       let selectedParking = null;
 
-      // Click Event for Lookouts and Parking (Temporary Straight Line)
+      // Click Event for Lookouts and Parking
       view.on("click", async function(event) {
         graphicsLayer.removeAll();
         const response = await view.hitTest(event);
@@ -196,7 +260,7 @@
           document.getElementById("selectedLookoutName").textContent = selectedLookout.attributes.name || `Lookout ${selectedLookout.attributes.OBJECTID}`;
           view.popup.open({
             title: `Lookout: ${selectedLookout.attributes.name || 'Unknown'}`,
-            content: "Click a parking spot to draw a line.",
+            content: "Click a parking spot to draw a route.",
             location: selectedLookout.geometry
           });
         } else if (parkingGraphic && selectedLookout) {
@@ -206,49 +270,90 @@
           const lookoutPoint = selectedLookout.geometry;
           const parkingCentroid = selectedParking.geometry.centroid || selectedParking.geometry;
 
-          // Draw a straight line (temporary)
-          const polyline = new Polyline({
-            paths: [
-              [parkingCentroid.x, parkingCentroid.y],
-              [lookoutPoint.x, lookoutPoint.y]
-            ],
-            spatialReference: view.spatialReference
-          });
+          try {
+            const routeGeometry = await findRouteAlongPaths(parkingCentroid, lookoutPoint);
 
-          const lineGraphic = new Graphic({
-            geometry: polyline,
-            symbol: {
-              type: "simple-line",
-              color: [255, 0, 0, 0.8],
-              width: 2
-            }
-          });
+            const routeGraphic = new Graphic({
+              geometry: routeGeometry,
+              symbol: {
+                type: "simple-line",
+                color: [255, 0, 0, 0.8],
+                width: 2
+              }
+            });
 
-          graphicsLayer.removeAll();
-          graphicsLayer.add(lineGraphic);
+            graphicsLayer.removeAll();
+            graphicsLayer.add(routeGraphic);
 
-          const parkingGraphic = new Graphic({
-            geometry: parkingCentroid,
-            symbol: {
-              type: "simple-marker",
-              color: [51, 87, 255],
-              size: 10,
-              outline: { color: "#FFFFFF", width: 1 }
-            }
-          });
-          const lookoutGraphic = new Graphic({
-            geometry: lookoutPoint,
-            symbol: {
-              type: "simple-marker",
-              color: "#FF33A1",
-              size: 10,
-              outline: { color: "#FFFFFF", width: 1 }
-            }
-          });
-          graphicsLayer.add(parkingGraphic);
-          graphicsLayer.add(lookoutGraphic);
+            const parkingGraphic = new Graphic({
+              geometry: parkingCentroid,
+              symbol: {
+                type: "simple-marker",
+                color: [51, 87, 255],
+                size: 10,
+                outline: { color: "#FFFFFF", width: 1 }
+              }
+            });
+            const lookoutGraphic = new Graphic({
+              geometry: lookoutPoint,
+              symbol: {
+                type: "simple-marker",
+                color: "#FF33A1",
+                size: 10,
+                outline: { color: "#FFFFFF", width: 1 }
+              }
+            });
+            graphicsLayer.add(parkingGraphic);
+            graphicsLayer.add(lookoutGraphic);
 
-          view.goTo(polyline);
+            view.goTo(routeGeometry);
+          } catch (error) {
+            console.error("Error finding route:", error);
+            alert("No route found. Drawing straight line as fallback.");
+
+            const polyline = new Polyline({
+              paths: [
+                [parkingCentroid.x, parkingCentroid.y],
+                [lookoutPoint.x, lookoutPoint.y]
+              ],
+              spatialReference: view.spatialReference
+            });
+
+            const lineGraphic = new Graphic({
+              geometry: polyline,
+              symbol: {
+                type: "simple-line",
+                color: [255, 0, 0, 0.8],
+                width: 2
+              }
+            });
+
+            graphicsLayer.removeAll();
+            graphicsLayer.add(lineGraphic);
+
+            const parkingGraphic = new Graphic({
+              geometry: parkingCentroid,
+              symbol: {
+                type: "simple-marker",
+                color: [51, 87, 255],
+                size: 10,
+                outline: { color: "#FFFFFF", width: 1 }
+              }
+            });
+            const lookoutGraphic = new Graphic({
+              geometry: lookoutPoint,
+              symbol: {
+                type: "simple-marker",
+                color: "#FF33A1",
+                size: 10,
+                outline: { color: "#FFFFFF", width: 1 }
+              }
+            });
+            graphicsLayer.add(parkingGraphic);
+            graphicsLayer.add(lookoutGraphic);
+
+            view.goTo(polyline);
+          }
         }
       });
 
