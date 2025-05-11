@@ -128,7 +128,7 @@
     ], function(Map, MapView, FeatureLayer, GraphicsLayer, Search, Legend, LayerList, BasemapToggle, Home, ScaleBar, Extent, geometryEngine, Graphic, Circle, Polyline, Point, RouteTask, RouteParameters, FeatureSet, IdentityManager, OAuthInfo) {
 
       const portalUrl = "https://mendelu.maps.arcgis.com";
-      const redirectUri = "http://localhost:8080"; // Update to your local server or app URL
+      const redirectUri = "https://junkers4.github.io/JustForFun/"; // Updated for GitHub Pages
       let oauthInfo = null;
 
       // Initialize map without immediate authentication
@@ -254,7 +254,7 @@
           },
           {
             layer: parkingLayer,
-            searchFields: ["name", "wheelchair"],
+            searchFields: ["name", "Collapsed: wheelchair"],
             displayField: "name",
             exactMatch: false,
             outFields: ["*"],
@@ -312,11 +312,16 @@
 
       view.ui.add(scaleBar, "bottom-left");
 
-      // Login Button Event
+      // Login Button Event with Debugging
       document.getElementById("loginButton").addEventListener("click", function() {
         const clientId = document.getElementById("clientIdInput").value.trim();
+        console.log("Client ID entered:", clientId); // Debug
+        console.log("Redirect URI:", redirectUri); // Debug
+        console.log("Portal URL:", portalUrl); // Debug
+
         if (!clientId) {
           alert("Please enter a valid Client ID.");
+          console.error("No Client ID provided.");
           return;
         }
 
@@ -329,17 +334,20 @@
           authNamespace: "/sharing/rest"
         });
 
+        console.log("OAuthInfo configured:", oauthInfo); // Debug
+
         IdentityManager.registerOAuthInfos([oauthInfo]);
 
         // Trigger login
         IdentityManager.getCredential(portalUrl + "/sharing/rest", { oAuthPopupConfirmation: false })
-          .then(function() {
-            console.log("User is signed in.");
-            document.getElementById("authDiv").style.display = "none"; // Hide login panel after successful login
+          .then(function(credential) {
+            console.log("User is signed in:", credential); // Debug
+            document.getElementById("authDiv").style.display = "none"; // Hide login panel
+            alert("Login successful!");
           })
           .catch(function(error) {
-            console.error("Login failed:", error);
-            alert("Login failed. Please check the Client ID and try again.");
+            console.error("Login failed:", error); // Debug
+            alert("Login failed. Please check the Client ID and Redirect URI.");
           });
       });
 
@@ -366,7 +374,7 @@
           lookoutsLayer.visible = false;
         } else if (value === "parking_wheelchair") {
           restaurantsDisabledLayer.visible = false;
-          restaurantsLayer.visible = true;
+          restaurantsLayer.visible = false;
           parkingLayer.visible = true;
           lookoutsLayer.visible = false;
         }
@@ -448,7 +456,8 @@
           });
         } else if (parkingGraphic) {
           selectedParking = parkingGraphic.graphic;
-          document.getElementById("selectedParkingName").textContent = selectedParking.attributes.name || `Parking ${selectedParking.attributes.OBJECTID}`;
+          document.getElementById("selectedParkingName").textContent = selected~~
+          searchGraphicsLayer.add(parkingGraphic);
         }
       });
 
@@ -700,7 +709,7 @@
             }
           });
 
-          searchGraphicsLayer.removeAll 
+          searchGraphicsLayer.removeAll();
           searchGraphicsLayer.add(routeGraphic);
           searchGraphicsLayer.add(new Graphic({
             geometry: parkingCentroid,
