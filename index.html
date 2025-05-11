@@ -128,10 +128,10 @@
     ], function(Map, MapView, FeatureLayer, GraphicsLayer, Search, Legend, LayerList, BasemapToggle, Home, ScaleBar, Extent, geometryEngine, Graphic, Circle, Polyline, Point, RouteTask, RouteParameters, FeatureSet, IdentityManager, OAuthInfo) {
 
       const portalUrl = "https://mendelu.maps.arcgis.com";
-      const redirectUri = "https://junkers4.github.io/JustForFun/"; // Updated for GitHub Pages
+      const redirectUri = "https://junkers4.github.io/JustForFun/"; // Must match ArcGIS app settings
       let oauthInfo = null;
 
-      // Initialize map without immediate authentication
+      // Initialize map
       const map = new Map({
         basemap: "dark-gray"
       });
@@ -254,7 +254,7 @@
           },
           {
             layer: parkingLayer,
-            searchFields: ["name", "Collapsed: wheelchair"],
+            searchFields: ["name", "wheelchair"],
             displayField: "name",
             exactMatch: false,
             outFields: ["*"],
@@ -312,12 +312,12 @@
 
       view.ui.add(scaleBar, "bottom-left");
 
-      // Login Button Event with Debugging
+      // Login Button Event with Popup
       document.getElementById("loginButton").addEventListener("click", function() {
         const clientId = document.getElementById("clientIdInput").value.trim();
-        console.log("Client ID entered:", clientId); // Debug
-        console.log("Redirect URI:", redirectUri); // Debug
-        console.log("Portal URL:", portalUrl); // Debug
+        console.log("Client ID entered:", clientId);
+        console.log("Redirect URI:", redirectUri);
+        console.log("Portal URL:", portalUrl);
 
         if (!clientId) {
           alert("Please enter a valid Client ID.");
@@ -325,30 +325,30 @@
           return;
         }
 
-        // Configure OAuth2 authentication
+        // Configure OAuth2 authentication with popup
         oauthInfo = new OAuthInfo({
           appId: clientId,
           portalUrl: portalUrl,
-          popup: true,
-          redirectUri: redirectUri,
+          popup: true, // Force popup mode
+          redirectUri: redirectUri, // Must match ArcGIS app settings
           authNamespace: "/sharing/rest"
         });
 
-        console.log("OAuthInfo configured:", oauthInfo); // Debug
+        console.log("OAuthInfo configured:", oauthInfo);
 
         IdentityManager.registerOAuthInfos([oauthInfo]);
 
-        // Trigger login
-        IdentityManager.getCredential(portalUrl + "/sharing/rest", { oAuthPopupConfirmation: false })
-          .then(function(credential) {
-            console.log("User is signed in:", credential); // Debug
-            document.getElementById("authDiv").style.display = "none"; // Hide login panel
-            alert("Login successful!");
-          })
-          .catch(function(error) {
-            console.error("Login failed:", error); // Debug
-            alert("Login failed. Please check the Client ID and Redirect URI.");
-          });
+        // Trigger login with popup
+        IdentityManager.getCredential(portalUrl + "/sharing/rest", {
+          oAuthPopupConfirmation: false
+        }).then(function(credential) {
+          console.log("User is signed in:", credential);
+          document.getElementById("authDiv").style.display = "none"; // Hide login panel
+          alert("Login successful! You can now use routing.");
+        }).catch(function(error) {
+          console.error("Login failed:", error);
+          alert("Login failed: " + error.message);
+        });
       });
 
       // Feature Filter
@@ -412,14 +412,14 @@
               })
             ]
           }),
-          returnDirections: false,
+          returnDirections: true,
           returnRoutes: true,
           findBestSequence: false,
           preserveFirstStop: true,
           preserveLastStop: true,
           directionsLanguage: "en",
           outputLines: "true-shape",
-          travelMode: "Walking Time"
+          travelMode: "Walking Time" // Use walking mode for pedestrian paths
         });
 
         try {
@@ -437,7 +437,7 @@
         }
       }
 
-      // Click Event for Lookouts and Parking
+      // Click Event for Lookouts and Parking with Immediate Routing
       view.on("click", async function(event) {
         searchGraphicsLayer.removeAll();
         const response = await view.hitTest(event);
@@ -446,22 +446,105 @@
 
         if (lookoutGraphic) {
           selectedLookout = lookoutGraphic.graphic;
-          endClickCount = 0;
-          document.getElementById("radiusSearchDiv").style.display = "block";
           document.getElementById("selectedLookoutName").textContent = selectedLookout.attributes.name || `Lookout ${selectedLookout.attributes.OBJECTID}`;
           view.popup.open({
             title: `Lookout: ${selectedLookout.attributes.name || 'Unknown'}`,
-            content: "Select a radius and click Search to show nearby features",
+            content: "Click a parking spot to draw a route.",
             location: selectedLookout.geometry
           });
-        } else if (parkingGraphic) {
+        } else if (parkingGraphic && selectedLookout) {
           selectedParking = parkingGraphic.graphic;
-          document.getElementById("selectedParkingName").textContent = selected~~
-          searchGraphicsLayer.add(parkingGraphic);
+          document.getElementById("selectedParkingName").textContent = selectedParking.attributes.name || `Parking ${selectedParking.attributes.OBJECTID}`;
+
+          // Automatically draw route after selecting parking
+          const lookoutPoint = selectedLookout.geometry;
+          const parkingCentroid = selectedParking.geometry.centroid || selectedParking.geometry;
+
+          try {
+            const routeGeometry = await findRouteAlongPaths(parkingCentroid, lookoutPoint);
+
+            const routeGraphic = new Graphic({
+              geometry: routeGeometry,
+              symbol: {
+                type: "simple-line",
+                color: [255, 0, 0, 0.8],
+                width: 2
+              }
+            });
+
+            searchGraphicsLayer.removeAll();
+            searchGraphicsLayer.add(routeGraphic);
+
+            const parkingGraphic = new Graphic({
+              geometry: parkingCentroid,
+              symbol: {
+                type: "simple-marker",
+                color: [51, 87, 255],
+                size: 10,
+                outline: { color: "#FFFFFF", width: 1 }
+              }
+            });
+            const lookoutGraphic = new Graphic({
+              geometry: lookoutPoint,
+              symbol: {
+                type: "simple-marker",
+                color: "#FF33A1",
+                size: 10,
+                outline: { color: "#FFFFFF", width: 1 }
+              }
+            });
+            searchGraphicsLayer.add(parkingGraphic);
+            searchGraphicsLayer.add(lookoutGraphic);
+
+            view.goTo(routeGeometry);
+          } catch (error) {
+            console.error("Error finding route:", error);
+            alert("No route found. Using straight line as fallback.");
+
+            const polyline = new Polyline({
+              paths: [
+                [parkingCentroid.x, parkingCentroid.y],
+                [lookoutPoint.x, lookoutPoint.y]
+              ],
+              spatialReference: view.spatialReference
+            });
+
+            const routeGraphic = new Graphic({
+              geometry: polyline,
+              symbol: {
+                type: "simple-line",
+                color: [255, 0, 0, 0.8],
+                width: 2
+              }
+            });
+
+            searchGraphicsLayer.removeAll();
+            searchGraphicsLayer.add(routeGraphic);
+            searchGraphicsLayer.add(new Graphic({
+              geometry: parkingCentroid,
+              symbol: {
+                type: "simple-marker",
+                color: [51, 87, 255],
+                size: 10,
+                outline: { color: "#FFFFFF", width: 1 }
+              }
+            }));
+            searchGraphicsLayer.add(new Graphic({
+              geometry: lookoutPoint,
+              symbol: {
+                type: "simple-marker",
+                color: "#FF33A1",
+                size: 10,
+                outline: { color: "#FFFFFF", width: 1 }
+              }
+            }));
+
+            view.goTo(polyline);
+          }
         }
       });
 
-      // Search Button Event
+      // Search Button Event (unchanged)
       document.getElementById("searchButton").addEventListener("click", async function() {
         if (!selectedLookout) return;
         const lookoutPoint = selectedLookout.geometry;
@@ -641,7 +724,7 @@
         }
       });
 
-      // Draw Route Button Event
+      // Draw Route Button Event (Optional, kept for manual triggering)
       document.getElementById("drawRouteButton").addEventListener("click", async function() {
         if (!selectedLookout || !selectedParking) {
           alert("Please select both a lookout and a parking spot by clicking on the map.");
@@ -689,8 +772,8 @@
 
           view.goTo(routeGeometry);
         } catch (error) {
-          console.error("Error finding path:", error);
-          alert("No path found. Using straight line as fallback.");
+          console.error("Error finding route:", error);
+          alert("No route found. Using straight line as fallback.");
 
           const polyline = new Polyline({
             paths: [
