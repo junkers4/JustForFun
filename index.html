@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>ArcGIS Map with Nearest Features and Fixed Disabled Restaurants</title>
+  <title>ArcGIS Map with Radius Search for All Features</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="https://js.arcgis.com/4.32/esri/themes/dark/main.css">
   <script src="https://js.arcgis.com/4.32/"></script>
@@ -23,17 +23,20 @@
       border-radius: 5px;
       z-index: 100;
     }
-    #nearestFeaturesDiv {
+    #radiusSearchDiv {
       position: absolute;
-      top: 50px;
-      right: 10px;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
       background-color: rgba(0, 0, 0, 0.8);
       color: white;
       padding: 10px;
       border-radius: 5px;
       z-index: 100;
-      max-width: 300px;
       display: none;
+    }
+    #radiusSearchDiv button {
+      margin-left: 5px;
     }
   </style>
 </head>
@@ -48,13 +51,24 @@
       <option value="parking_wheelchair">Parking (Wheelchair)</option>
     </select>
   </div>
-  <div id="nearestFeaturesDiv"></div>
+  <div id="radiusSearchDiv">
+    <label for="radiusSelect">Search Radius: </label>
+    <select id="radiusSelect">
+      <option value="500">500 meters</option>
+      <option value="1000">1000 meters</option>
+      <option value="2000">2000 meters</option>
+      <option value="5000">5000 meters</option>
+    </select>
+    <button id="searchButton">Search</button>
+    <button id="endButton">End</button>
+  </div>
 
   <script>
     require([
       "esri/Map",
       "esri/views/MapView",
       "esri/layers/FeatureLayer",
+      "esri/layers/GraphicsLayer",
       "esri/widgets/Search",
       "esri/widgets/Legend",
       "esri/widgets/LayerList",
@@ -63,8 +77,10 @@
       "esri/widgets/ScaleBar",
       "esri/geometry/Extent",
       "esri/geometry/geometryEngine",
-      "esri/Graphic"
-    ], function(Map, MapView, FeatureLayer, Search, Legend, LayerList, BasemapToggle, Home, ScaleBar, Extent, geometryEngine, Graphic) {
+      "esri/Graphic",
+      "esri/geometry/Circle",
+      "esri/geometry/Point"
+    ], function(Map, MapView, FeatureLayer, GraphicsLayer, Search, Legend, LayerList, BasemapToggle, Home, ScaleBar, Extent, geometryEngine, Graphic, Circle, Point) {
 
       const map = new Map({
         basemap: "dark-gray"
@@ -77,6 +93,12 @@
         zoom: 13
       });
 
+      // Graphics Layer for search results
+      const searchGraphicsLayer = new GraphicsLayer({
+        title: "Search Results"
+      });
+      map.add(searchGraphicsLayer);
+
       // Restaurants Disabled Layer (Points)
       const restaurantsDisabledLayer = new FeatureLayer({
         url: "https://services3.arcgis.com/lOWgvXGCzs0MJj0p/ArcGIS/rest/services/allwheelchaiarresutarus/FeatureServer/0",
@@ -84,14 +106,14 @@
         outFields: ["*"],
         popupTemplate: {
           title: "{name}",
-          content: "Wheelchair: {wheelchair}" // Update 'wheelchair' with actual field
+          content: "Wheelchair: {wheelchair}"
         },
         renderer: {
           type: "simple",
           symbol: {
             type: "simple-marker",
             color: "#FF5733",
-            size: 10,
+            size: 12,
             outline: { color: "#FFFFFF", width: 1 }
           }
         }
@@ -104,7 +126,7 @@
         outFields: ["*"],
         popupTemplate: {
           title: "{name}",
-          content: "Cuisine: {cuisine}" // Update 'cuisine' with actual field
+          content: "Cuisine: {cuisine}"
         },
         renderer: {
           type: "simple",
@@ -124,7 +146,7 @@
         outFields: ["*"],
         popupTemplate: {
           title: "{name}",
-          content: "Wheelchair: {wheelchair}" // Update 'wheelchair' with actual field
+          content: "Wheelchair: {wheelchair}"
         },
         renderer: {
           type: "simple",
@@ -143,7 +165,7 @@
         outFields: ["*"],
         popupTemplate: {
           title: "{name}",
-          content: "Click to find nearest features"
+          content: "Select a radius and click Search to show nearby features"
         },
         renderer: {
           type: "simple",
@@ -164,7 +186,7 @@
         sources: [
           {
             layer: restaurantsDisabledLayer,
-            searchFields: ["name", "wheelchair"], // Update 'wheelchair'
+            searchFields: ["name", "wheelchair"],
             displayField: "name",
             exactMatch: false,
             outFields: ["*"],
@@ -173,7 +195,7 @@
           },
           {
             layer: restaurantsLayer,
-            searchFields: ["name", "cuisine"], // Update 'cuisine'
+            searchFields: ["name", "cuisine"],
             displayField: "name",
             exactMatch: false,
             outFields: ["*"],
@@ -182,7 +204,7 @@
           },
           {
             layer: parkingLayer,
-            searchFields: ["name", "wheelchair"], // Update 'wheelchair'
+            searchFields: ["name", "wheelchair"],
             displayField: "name",
             exactMatch: false,
             outFields: ["*"],
@@ -244,196 +266,240 @@
       const filterSelect = document.getElementById("filterSelect");
       filterSelect.addEventListener("change", function(event) {
         const value = event.target.value;
-        view.graphics.removeAll(); // Clear highlights
-        document.getElementById("nearestFeaturesDiv").style.display = "none"; // Hide nearest features panel
+        searchGraphicsLayer.removeAll();
+        document.getElementById("radiusSearchDiv").style.display = "none";
+        view.popup.close();
         if (value === "all") {
-          restaurantsDisabledLayer.definitionExpression = "";
-          restaurantsLayer.definitionExpression = "";
-          parkingLayer.definitionExpression = "";
-          lookoutsLayer.definitionExpression = "";
+          restaurantsDisabledLayer.visible = true;
+          restaurantsLayer.visible = true;
+          parkingLayer.visible = true;
+          lookoutsLayer.visible = true;
         } else if (value === "restaurants_disabled") {
-          restaurantsDisabledLayer.definitionExpression = "wheelchair = 'Yes'"; // Update 'wheelchair' field and 'Yes' value
-          restaurantsLayer.definitionExpression = "1=0";
-          parkingLayer.definitionExpression = "1=0";
-          lookoutsLayer.definitionExpression = "1=0";
+          restaurantsDisabledLayer.visible = true;
+          restaurantsLayer.visible = false;
+          parkingLayer.visible = false;
+          lookoutsLayer.visible = false;
         } else if (value === "restaurants") {
-          restaurantsDisabledLayer.definitionExpression = "1=0";
-          restaurantsLayer.definitionExpression = ""; // Show all restaurants
-          parkingLayer.definitionExpression = "1=0";
-          lookoutsLayer.definitionExpression = "1=0";
+          restaurantsDisabledLayer.visible = false;
+          restaurantsLayer.visible = true;
+          parkingLayer.visible = false;
+          lookoutsLayer.visible = false;
         } else if (value === "parking_wheelchair") {
-          restaurantsDisabledLayer.definitionExpression = "1=0";
-          restaurantsLayer.definitionExpression = "1=0";
-          parkingLayer.definitionExpression = "wheelchair = 'Yes'"; // Update 'wheelchair' field and 'Yes' value
-          lookoutsLayer.definitionExpression = "1=0";
+          restaurantsDisabledLayer.visible = false;
+          restaurantsLayer.visible = false;
+          parkingLayer.visible = true;
+          lookoutsLayer.visible = false;
         }
       });
 
       // Click Event for Lookouts
+      let selectedLookout = null;
       view.on("click", async function(event) {
-        view.graphics.removeAll(); // Clear previous highlights
+        searchGraphicsLayer.removeAll();
         const response = await view.hitTest(event);
         const lookoutGraphic = response.results.find(result => result.graphic.layer === lookoutsLayer);
         if (lookoutGraphic) {
-          const lookout = lookoutGraphic.graphic;
-          const lookoutPoint = lookout.geometry;
-          const lookoutId = lookout.attributes.OBJECTID; // Assuming OBJECTID is the unique ID
+          selectedLookout = lookoutGraphic.graphic;
+          const lookoutPoint = selectedLookout.geometry;
 
-          // Hide all features except the clicked lookout
-          lookoutsLayer.definitionExpression = `OBJECTID = ${lookoutId}`;
-          restaurantsDisabledLayer.definitionExpression = "1=0";
-          restaurantsLayer.definitionExpression = "1=0";
-          parkingLayer.definitionExpression = "1=0";
-
-          // Query nearest features
-          const nearestFeatures = {};
-
-          // Nearest Parking
-          let query = parkingLayer.createQuery();
-          query.geometry = lookoutPoint;
-          query.distance = 5000; // Search within 5km
-          query.units = "meters";
-          query.spatialRelationship = "intersects";
-          query.returnGeometry = true;
-          query.outFields = ["*"];
-          const parkingResult = await parkingLayer.queryFeatures(query);
-          if (parkingResult.features.length > 0) {
-            nearestFeatures.parking = parkingResult.features.reduce((closest, feature) => {
-              const distance = geometryEngine.distance(lookoutPoint, feature.geometry.centroid, "meters");
-              return (!closest || distance < closest.distance) ? { feature, distance } : closest;
-            }, null);
-            parkingLayer.definitionExpression = `OBJECTID = ${nearestFeatures.parking.feature.attributes.OBJECTID}`;
-          }
-
-          // Nearest Wheelchair Parking
-          query = parkingLayer.createQuery();
-          query.geometry = lookoutPoint;
-          query.where = "wheelchair = 'Yes'"; // Update 'wheelchair' field and 'Yes' value
-          query.distance = 5000;
-          query.units = "meters";
-          query.spatialRelationship = "intersects";
-          query.returnGeometry = true;
-          query.outFields = ["*"];
-          const wheelchairParkingResult = await parkingLayer.queryFeatures(query);
-          if (wheelchairParkingResult.features.length > 0) {
-            nearestFeatures.wheelchairParking = wheelchairParkingResult.features.reduce((closest, feature) => {
-              const distance = geometryEngine.distance(lookoutPoint, feature.geometry.centroid, "meters");
-              return (!closest || distance < closest.distance) ? { feature, distance } : closest;
-            }, null);
-            parkingLayer.definitionExpression += nearestFeatures.parking
-              ? ` OR OBJECTID = ${nearestFeatures.wheelchairParking.feature.attributes.OBJECTID}`
-              : `OBJECTID = ${nearestFeatures.wheelchairParking.feature.attributes.OBJECTID}`;
-          }
-
-          // Nearest Restaurant
-          query = restaurantsLayer.createQuery();
-          query.geometry = lookoutPoint;
-          query.distance = 5000;
-          query.units = "meters";
-          query.spatialRelationship = "intersects";
-          query.returnGeometry = true;
-          query.outFields = ["*"];
-          const restaurantResult = await restaurantsLayer.queryFeatures(query);
-          if (restaurantResult.features.length > 0) {
-            nearestFeatures.restaurant = restaurantResult.features.reduce((closest, feature) => {
-              const distance = geometryEngine.distance(lookoutPoint, feature.geometry, "meters");
-              return (!closest || distance < closest.distance) ? { feature, distance } : closest;
-            }, null);
-            restaurantsLayer.definitionExpression = `OBJECTID = ${nearestFeatures.restaurant.feature.attributes.OBJECTID}`;
-          }
-
-          // Nearest Wheelchair Restaurant
-          query = restaurantsDisabledLayer.createQuery();
-          query.geometry = lookoutPoint;
-          query.where = "wheelchair = 'Yes'"; // Update 'wheelchair' field and 'Yes' value
-          query.distance = 5000;
-          query.units = "meters";
-          query.spatialRelationship = "intersects";
-          query.returnGeometry = true;
-          query.outFields = ["*"];
-          const wheelchairRestaurantResult = await restaurantsDisabledLayer.queryFeatures(query);
-          if (wheelchairRestaurantResult.features.length > 0) {
-            nearestFeatures.wheelchairRestaurant = wheelchairRestaurantResult.features.reduce((closest, feature) => {
-              const distance = geometryEngine.distance(lookoutPoint, feature.geometry, "meters");
-              return (!closest || distance < closest.distance) ? { feature, distance } : closest;
-            }, null);
-            restaurantsDisabledLayer.definitionExpression = `OBJECTID = ${nearestFeatures.wheelchairRestaurant.feature.attributes.OBJECTID}`;
-          }
-
-          // Create Nearest Features Panel Content
-          let panelContent = `<b>Nearest Features to ${lookout.attributes.name || 'Unknown'}:</b><ul>`;
-          if (nearestFeatures.parking) {
-            panelContent += `<li><b>Parking</b>: ${nearestFeatures.parking.feature.attributes.name || 'Unknown'} (${Math.round(nearestFeatures.parking.distance)}m)</li>`;
-          } else {
-            panelContent += `<li><b>Parking</b>: None found within 5km</li>`;
-          }
-          if (nearestFeatures.wheelchairParking) {
-            panelContent += `<li><b>Wheelchair Parking</b>: ${nearestFeatures.wheelchairParking.feature.attributes.name || 'Unknown'} (${Math.round(nearestFeatures.wheelchairParking.distance)}m)</li>`;
-          } else {
-            panelContent += `<li><b>Wheelchair Parking</b>: None found within 5km</li>`;
-          }
-          if (nearestFeatures.restaurant) {
-            panelContent += `<li><b>Restaurant</b>: ${nearestFeatures.restaurant.feature.attributes.name || 'Unknown'} (${Math.round(nearestFeatures.restaurant.distance)}m)</li>`;
-          } else {
-            panelContent += `<li><b>Restaurant</b>: None found within 5km</li>`;
-          }
-          if (nearestFeatures.wheelchairRestaurant) {
-            panelContent += `<li><b>Wheelchair Restaurant</b>: ${nearestFeatures.wheelchairRestaurant.feature.attributes.name || 'Unknown'} (${Math.round(nearestFeatures.wheelchairRestaurant.distance)}m)</li>`;
-          } else {
-            panelContent += `<li><b>Wheelchair Restaurant</b>: None found within 5km</li>`;
-          }
-          panelContent += `</ul>`;
-
-          // Update Nearest Features Panel
-          const nearestFeaturesDiv = document.getElementById("nearestFeaturesDiv");
-          nearestFeaturesDiv.innerHTML = panelContent;
-          nearestFeaturesDiv.style.display = "block";
-
-          // Highlight Nearest Features
-          const highlightSymbolPoint = {
-            type: "simple-marker",
-            color: "#FFFF00",
-            size: 12,
-            outline: { color: "#000000", width: 1 }
-          };
-          const highlightSymbolPolygon = {
-            type: "simple-fill",
-            color: [255, 255, 0, 0.3],
-            outline: { color: "#FFFF00", width: 2 }
-          };
-
-          if (nearestFeatures.parking) {
-            view.graphics.add(new Graphic({
-              geometry: nearestFeatures.parking.feature.geometry.centroid,
-              symbol: highlightSymbolPoint
-            }));
-          }
-          if (nearestFeatures.wheelchairParking) {
-            view.graphics.add(new Graphic({
-              geometry: nearestFeatures.wheelchairParking.feature.geometry,
-              symbol: highlightSymbolPolygon
-            }));
-          }
-          if (nearestFeatures.restaurant) {
-            view.graphics.add(new Graphic({
-              geometry: nearestFeatures.restaurant.feature.geometry,
-              symbol: highlightSymbolPoint
-            }));
-          }
-          if (nearestFeatures.wheelchairRestaurant) {
-            view.graphics.add(new Graphic({
-              geometry: nearestFeatures.wheelchairRestaurant.feature.geometry,
-              symbol: highlightSymbolPoint
-            }));
-          }
+          // Show Radius Search UI
+          document.getElementById("radiusSearchDiv").style.display = "block";
 
           // Open Popup
           view.popup.open({
-            title: `Lookout: ${lookout.attributes.name || 'Unknown'}`,
-            content: "Nearest features shown in panel (top-right)",
+            title: `Lookout: ${selectedLookout.attributes.name || 'Unknown'}`,
+            content: "Select a radius and click Search to show nearby features",
             location: lookoutPoint
           });
         }
+      });
+
+      // Search Button Event
+      document.getElementById("searchButton").addEventListener("click", async function() {
+        if (!selectedLookout) return;
+        const lookoutPoint = selectedLookout.geometry;
+        const radius = parseInt(document.getElementById("radiusSelect").value);
+
+        // Clear previous graphics
+        searchGraphicsLayer.removeAll();
+
+        // Hide all feature layers except lookouts
+        restaurantsDisabledLayer.visible = false;
+        restaurantsLayer.visible = false;
+        parkingLayer.visible = false;
+        lookoutsLayer.visible = false;
+
+        // Create radius circle graphic
+        const circle = new Circle({
+          center: lookoutPoint,
+          radius: radius,
+          radiusUnit: "meters"
+        });
+        const circleGraphic = new Graphic({
+          geometry: circle,
+          symbol: {
+            type: "simple-fill",
+            color: [255, 255, 255, 0.2],
+            outline: { color: [255, 255, 255, 0.8], width: 2 }
+          }
+        });
+        searchGraphicsLayer.add(circleGraphic);
+
+        // Add selected lookout graphic
+        const lookoutGraphic = new Graphic({
+          geometry: lookoutPoint,
+          symbol: {
+            type: "simple-marker",
+            color: "#FF33A1",
+            size: 10,
+            outline: { color: "#FFFFFF", width: 1 }
+          },
+          attributes: selectedLookout.attributes,
+          popupTemplate: {
+            title: "{name}",
+            content: "Select a radius and click Search to show nearby features"
+          }
+        });
+        searchGraphicsLayer.add(lookoutGraphic);
+
+        // Helper function to check if a feature is within the radius
+        const isWithinRadius = (featureGeometry, centerPoint, radiusMeters) => {
+          const distance = geometryEngine.distance(centerPoint, featureGeometry, "meters");
+          return distance <= radiusMeters;
+        };
+
+        // Query Restaurants Disabled
+        let query = restaurantsDisabledLayer.createQuery();
+        query.geometry = circle;
+        query.spatialRelationship = "intersects";
+        query.returnGeometry = true;
+        query.outFields = ["*"];
+        const wheelchairRestaurantResult = await restaurantsDisabledLayer.queryFeatures(query);
+        wheelchairRestaurantResult.features.forEach(feature => {
+          if (isWithinRadius(feature.geometry, lookoutPoint, radius)) {
+            const graphic = new Graphic({
+              geometry: feature.geometry,
+              symbol: {
+                type: "simple-marker",
+                color: "#FF5733",
+                size: 12,
+                outline: { color: "#FFFFFF", width: 1 }
+              },
+              attributes: feature.attributes,
+              popupTemplate: {
+                title: "{name}",
+                content: "Wheelchair: {wheelchair}"
+              }
+            });
+            searchGraphicsLayer.add(graphic);
+          }
+        });
+
+        // Query Restaurants
+        query = restaurantsLayer.createQuery();
+        query.geometry = circle;
+        query.spatialRelationship = "intersects";
+        query.returnGeometry = true;
+        query.outFields = ["*"];
+        const restaurantResult = await restaurantsLayer.queryFeatures(query);
+        restaurantResult.features.forEach(feature => {
+          if (isWithinRadius(feature.geometry, lookoutPoint, radius)) {
+            const graphic = new Graphic({
+              geometry: feature.geometry,
+              symbol: {
+                type: "simple-marker",
+                color: "#33FF57",
+                size: 10,
+                outline: { color: "#FFFFFF", width: 1 }
+              },
+              attributes: feature.attributes,
+              popupTemplate: {
+                title: "{name}",
+                content: "Cuisine: {cuisine}"
+              }
+            });
+            searchGraphicsLayer.add(graphic);
+          }
+        });
+
+        // Query Parking
+        query = parkingLayer.createQuery();
+        query.geometry = circle;
+        query.spatialRelationship = "intersects";
+        query.returnGeometry = true;
+        query.outFields = ["*"];
+        const parkingResult = await parkingLayer.queryFeatures(query);
+        parkingResult.features.forEach(feature => {
+          // For polygons, use the centroid to calculate distance
+          const centroid = feature.geometry.centroid || feature.geometry;
+          if (isWithinRadius(centroid, lookoutPoint, radius)) {
+            const graphic = new Graphic({
+              geometry: feature.geometry,
+              symbol: {
+                type: "simple-fill",
+                color: [51, 87, 255, 0.5],
+                outline: { color: "#FFFFFF", width: 1 }
+              },
+              attributes: feature.attributes,
+              popupTemplate: {
+                title: "{name}",
+                content: "Wheelchair: {wheelchair}"
+              }
+            });
+            searchGraphicsLayer.add(graphic);
+          }
+        });
+
+        // Query Lookouts (to ensure no other lookouts are shown)
+        query = lookoutsLayer.createQuery();
+        query.geometry = circle;
+        query.spatialRelationship = "intersects";
+        query.returnGeometry = true;
+        query.outFields = ["*"];
+        const lookoutResult = await lookoutsLayer.queryFeatures(query);
+        lookoutResult.features.forEach(feature => {
+          if (feature.attributes.OBJECTID === selectedLookout.attributes.OBJECTID) return; // Skip the selected lookout
+          if (isWithinRadius(feature.geometry, lookoutPoint, radius)) {
+            const graphic = new Graphic({
+              geometry: feature.geometry,
+              symbol: {
+                type: "simple-marker",
+                color: "#FF33A1",
+                size: 10,
+                outline: { color: "#FFFFFF", width: 1 }
+              },
+              attributes: feature.attributes,
+              popupTemplate: {
+                title: "{name}",
+                content: "Select a radius and click Search to show nearby features"
+              }
+            });
+            searchGraphicsLayer.add(graphic);
+          }
+        });
+
+        // Update Popup
+        view.popup.open({
+          title: `Lookout: ${selectedLookout.attributes.name || 'Unknown'}`,
+          content: `Features within ${radius}m shown on map`,
+          location: lookoutPoint
+        });
+
+        // Zoom to radius extent
+        view.goTo(circle);
+      });
+
+      // End Button Event
+      document.getElementById("endButton").addEventListener("click", function() {
+        selectedLookout = null;
+        searchGraphicsLayer.removeAll();
+        document.getElementById("radiusSearchDiv").style.display = "none";
+        view.popup.close();
+        // Restore all layers
+        restaurantsDisabledLayer.visible = true;
+        restaurantsLayer.visible = true;
+        parkingLayer.visible = true;
+        lookoutsLayer.visible = true;
       });
 
       // Zoom to combined extent
