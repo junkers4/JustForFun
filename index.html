@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <title>ArcGIS Map with Authenticated Route Service</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="https://js.arcgis.com/4.32/esri/themes/dark/main.css">
-  <script src="https://js.arcgis.com/4.32/"></script>
+  <link rel="stylesheet" href="https://js.arcgis.com/4.31/esri/themes/dark/main.css">
+  <script src="https://js.arcgis.com/4.31/"></script>
   <style>
     html, body, #viewDiv {
       padding: 0;
@@ -125,7 +125,11 @@
       "esri/tasks/support/FeatureSet",
       "esri/identity/IdentityManager",
       "esri/identity/OAuthInfo"
-    ], function(Map, MapView, FeatureLayer, GraphicsLayer, Search, Legend, LayerList, BasemapToggle, Home, ScaleBar, Extent, geometryEngine, Graphic, Circle, Polyline, Point, RouteTask, RouteParameters, FeatureSet, IdentityManager, OAuthInfo) {
+    ], function(
+      Map, MapView, FeatureLayer, GraphicsLayer, Search, Legend, LayerList, BasemapToggle, Home, ScaleBar,
+      Extent, geometryEngine, Graphic, Circle, Polyline, Point, RouteTask, RouteParameters, FeatureSet, IdentityManager, OAuthInfo
+    ) {
+      console.log("ArcGIS API modules loaded successfully");
 
       const portalUrl = "https://mendelu.maps.arcgis.com";
       const redirectUri = "https://junkers4.github.io/JustForFun/"; // Must match ArcGIS app settings
@@ -331,7 +335,7 @@
           oauthInfo = new OAuthInfo({
             appId: clientId,
             portalUrl: portalUrl,
-            popup: true, // Force popup mode
+            popup: true,
             redirectUri: redirectUri,
             authNamespace: "/sharing/rest"
           });
@@ -346,7 +350,7 @@
             oAuthPopupConfirmation: false
           }).then(function(credential) {
             console.log("User is signed in:", credential);
-            document.getElementById("authDiv").style.display = "none"; // Hide login panel
+            document.getElementById("authDiv").style.display = "none";
             alert("Login successful! You can now use routing.");
           }).catch(function(error) {
             console.error("Login failed:", error);
@@ -731,7 +735,7 @@
         }
       });
 
-      // Draw Route Button Event (Optional, kept for manual triggering)
+      // Draw Route Button Event
       document.getElementById("drawRouteButton").addEventListener("click", async function() {
         if (!selectedLookout || !selectedParking) {
           alert("Please select both a lookout and a parking spot by clicking on the map.");
@@ -862,6 +866,9 @@
           }
         });
       });
+    }, function(error) {
+      console.error("Error loading ArcGIS API modules:", error);
+      alert("Failed to load ArcGIS API modules. Please try again later.");
     });
   </script>
 </body>
