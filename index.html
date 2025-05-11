@@ -215,7 +215,7 @@
         outFields: ["*"],
         popupTemplate: {
           title: "{name}",
-          content: "Select a radius and click Search to show nearby features"
+          content: "Click a parking spot to draw a route."
         },
         renderer: {
           type: "simple",
@@ -312,8 +312,9 @@
 
       view.ui.add(scaleBar, "bottom-left");
 
-      // Login Button Event with Popup
+      // Login Button Event with Enhanced Debugging
       document.getElementById("loginButton").addEventListener("click", function() {
+        console.log("Login button clicked");
         const clientId = document.getElementById("clientIdInput").value.trim();
         console.log("Client ID entered:", clientId);
         console.log("Redirect URI:", redirectUri);
@@ -325,30 +326,36 @@
           return;
         }
 
-        // Configure OAuth2 authentication with popup
-        oauthInfo = new OAuthInfo({
-          appId: clientId,
-          portalUrl: portalUrl,
-          popup: true, // Force popup mode
-          redirectUri: redirectUri, // Must match ArcGIS app settings
-          authNamespace: "/sharing/rest"
-        });
+        try {
+          // Configure OAuth2 authentication with popup
+          oauthInfo = new OAuthInfo({
+            appId: clientId,
+            portalUrl: portalUrl,
+            popup: true, // Force popup mode
+            redirectUri: redirectUri,
+            authNamespace: "/sharing/rest"
+          });
 
-        console.log("OAuthInfo configured:", oauthInfo);
+          console.log("OAuthInfo configured:", oauthInfo);
 
-        IdentityManager.registerOAuthInfos([oauthInfo]);
+          IdentityManager.registerOAuthInfos([oauthInfo]);
+          console.log("OAuthInfo registered");
 
-        // Trigger login with popup
-        IdentityManager.getCredential(portalUrl + "/sharing/rest", {
-          oAuthPopupConfirmation: false
-        }).then(function(credential) {
-          console.log("User is signed in:", credential);
-          document.getElementById("authDiv").style.display = "none"; // Hide login panel
-          alert("Login successful! You can now use routing.");
-        }).catch(function(error) {
-          console.error("Login failed:", error);
-          alert("Login failed: " + error.message);
-        });
+          // Trigger login with popup
+          IdentityManager.getCredential(portalUrl + "/sharing/rest", {
+            oAuthPopupConfirmation: false
+          }).then(function(credential) {
+            console.log("User is signed in:", credential);
+            document.getElementById("authDiv").style.display = "none"; // Hide login panel
+            alert("Login successful! You can now use routing.");
+          }).catch(function(error) {
+            console.error("Login failed:", error);
+            alert("Login failed: " + error.message);
+          });
+        } catch (error) {
+          console.error("Error during login setup:", error);
+          alert("Error during login setup: " + error.message);
+        }
       });
 
       // Feature Filter
@@ -419,7 +426,7 @@
           preserveLastStop: true,
           directionsLanguage: "en",
           outputLines: "true-shape",
-          travelMode: "Walking Time" // Use walking mode for pedestrian paths
+          travelMode: "Walking Time"
         });
 
         try {
@@ -544,7 +551,7 @@
         }
       });
 
-      // Search Button Event (unchanged)
+      // Search Button Event
       document.getElementById("searchButton").addEventListener("click", async function() {
         if (!selectedLookout) return;
         const lookoutPoint = selectedLookout.geometry;
