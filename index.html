@@ -38,6 +38,17 @@
     #radiusSearchDiv button {
       margin-left: 5px;
     }
+    #parkingFilterDiv {
+      position: absolute;
+      top: 50px;
+      left: 80px;
+      background-color: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 100;
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -45,10 +56,20 @@
   <div id="filterDiv">
     <label for="filterSelect">Filter Features: </label>
     <select id="filterSelect">
+      <option value="lookouts">Lookouts Only</option>
       <option value="all">All Features</option>
       <option value="restaurants_disabled">Restaurants (Disabled)</option>
       <option value="restaurants">Restaurants</option>
       <option value="parking_wheelchair">Parking (Wheelchair)</option>
+      <option value="obstacles">Obstacles</option>
+    </select>
+  </div>
+  <div id="parkingFilterDiv">
+    <label for="parkingFilterSelect">Parking Filter: </label>
+    <select id="parkingFilterSelect">
+      <option value="all">All Parking</option>
+      <option value="wheelchair_yes">Wheelchair Accessible</option>
+      <option value="limited">Limited Access</option>
     </select>
   </div>
   <div id="radiusSearchDiv">
@@ -113,10 +134,11 @@
           symbol: {
             type: "simple-marker",
             color: "#FF5733",
-            size: 12,
+            size: 14,
             outline: { color: "#FFFFFF", width: 1 }
           }
-        }
+        },
+        visible: false // Disabled by default
       });
 
       // Restaurants Layer (Points)
@@ -136,7 +158,8 @@
             size: 10,
             outline: { color: "#FFFFFF", width: 1 }
           }
-        }
+        },
+        visible: false // Disabled by default
       });
 
       // Parking Layer (Polygons)
@@ -146,7 +169,7 @@
         outFields: ["*"],
         popupTemplate: {
           title: "{name}",
-          content: "Wheelchair: {wheelchair}"
+          content: "Wheelchair: {wheelchair}<br>Access: {access}"
         },
         renderer: {
           type: "simple",
@@ -155,7 +178,28 @@
             color: [51, 87, 255, 0.5],
             outline: { color: "#FFFFFF", width: 1 }
           }
-        }
+        },
+        visible: false // Disabled by default
+      });
+
+      // Obstacles Layer (Polylines or Points)
+      const obstaclesLayer = new FeatureLayer({
+        url: "https://services3.arcgis.com/lOWgvXGCzs0MJj0p/arcgis/rest/services/obstacles/FeatureServer/0",
+        title: "Obstacles",
+        outFields: ["*"],
+        popupTemplate: {
+          title: "{type}",
+          content: "Description: {description}"
+        },
+        renderer: {
+          type: "simple",
+          symbol: {
+            type: "simple-line",
+            color: "#FF0000",
+            width: 3
+          }
+        },
+        visible: false // Disabled by default
       });
 
       // Lookouts Layer (Points)
@@ -175,10 +219,12 @@
             size: 10,
             outline: { color: "#FFFFFF", width: 1 }
           }
-        }
+        },
+        visible: true // Enabled by default
       });
 
-      map.addMany([restaurantsDisabledLayer, restaurantsLayer, parkingLayer, lookoutsLayer]);
+      // Add layers in order to control rendering
+      map.addMany([restaurantsLayer, restaurantsDisabledLayer, parkingLayer, obstaclesLayer, lookoutsLayer]);
 
       // Search Widget
       const search = new Search({
@@ -204,12 +250,21 @@
           },
           {
             layer: parkingLayer,
-            searchFields: ["name", "wheelchair"],
+            searchFields: ["name", "wheelchair", "access"],
             displayField: "name",
             exactMatch: false,
             outFields: ["*"],
             name: "Parking",
             placeholder: "Search parking"
+          },
+          {
+            layer: obstaclesLayer,
+            searchFields: ["type", "description"],
+            displayField: "type",
+            exactMatch: false,
+            outFields: ["*"],
+            name: "Obstacles",
+            placeholder: "Search obstacles"
           },
           {
             layer: lookoutsLayer,
@@ -268,27 +323,48 @@
         const value = event.target.value;
         searchGraphicsLayer.removeAll();
         document.getElementById("radiusSearchDiv").style.display = "none";
+        document.getElementById("parkingFilterDiv").style.display = value === "parking_wheelchair" ? "block" : "none";
         view.popup.close();
-        if (value === "all") {
+
+        // Reset all layers to invisible
+        restaurantsDisabledLayer.visible = false;
+        restaurantsLayer.visible = false;
+        parkingLayer.visible = false;
+        obstaclesLayer.visible = false;
+        lookoutsLayer.visible = false;
+        parkingLayer.definitionExpression = ""; // Reset parking filter
+
+        if (value === "lookouts") {
+          lookoutsLayer.visible = true;
+        } else if (value === "all") {
           restaurantsDisabledLayer.visible = true;
           restaurantsLayer.visible = true;
           parkingLayer.visible = true;
+          obstaclesLayer.visible = true;
           lookoutsLayer.visible = true;
         } else if (value === "restaurants_disabled") {
           restaurantsDisabledLayer.visible = true;
-          restaurantsLayer.visible = false;
-          parkingLayer.visible = false;
-          lookoutsLayer.visible = false;
         } else if (value === "restaurants") {
-          restaurantsDisabledLayer.visible = false;
           restaurantsLayer.visible = true;
-          parkingLayer.visible = false;
-          lookoutsLayer.visible = false;
         } else if (value === "parking_wheelchair") {
-          restaurantsDisabledLayer.visible = false;
-          restaurantsLayer.visible = false;
           parkingLayer.visible = true;
-          lookoutsLayer.visible = false;
+          // Apply default parking filter if needed
+          parkingLayer.definitionExpression = "wheelchair = 'yes'"; // Default to wheelchair accessible
+        } else if (value === "obstacles") {
+          obstaclesLayer.visible = true;
+        }
+      });
+
+      // Parking Filter
+      const parkingFilterSelect = document.getElementById("parkingFilterSelect");
+      parkingFilterSelect.addEventListener("change", function(event) {
+        const value = event.target.value;
+        if (value === "all") {
+          parkingLayer.definitionExpression = "";
+        } else if (value === "wheelchair_yes") {
+          parkingLayer.definitionExpression = "wheelchair = 'yes'";
+        } else if (value === "limited") {
+          parkingLayer.definitionExpression = "access = 'limited'";
         }
       });
 
@@ -327,6 +403,7 @@
         restaurantsDisabledLayer.visible = false;
         restaurantsLayer.visible = false;
         parkingLayer.visible = false;
+        obstaclesLayer.visible = false;
         lookoutsLayer.visible = false;
 
         // Create radius circle graphic
@@ -382,7 +459,7 @@
               symbol: {
                 type: "simple-marker",
                 color: "#FF5733",
-                size: 12,
+                size: 14,
                 outline: { color: "#FFFFFF", width: 1 }
               },
               attributes: feature.attributes,
@@ -422,15 +499,15 @@
           }
         });
 
-        // Query Parking
+        // Query Parking with current filter
         query = parkingLayer.createQuery();
         query.geometry = circle;
         query.spatialRelationship = "intersects";
         query.returnGeometry = true;
         query.outFields = ["*"];
+        query.where = parkingLayer.definitionExpression || "1=1"; // Apply current parking filter
         const parkingResult = await parkingLayer.queryFeatures(query);
         parkingResult.features.forEach(feature => {
-          // For polygons, use the centroid to calculate distance
           const centroid = feature.geometry.centroid || feature.geometry;
           if (isWithinRadius(centroid, lookoutPoint, radius)) {
             const graphic = new Graphic({
@@ -443,7 +520,34 @@
               attributes: feature.attributes,
               popupTemplate: {
                 title: "{name}",
-                content: "Wheelchair: {wheelchair}"
+                content: "Wheelchair: {wheelchair}<br>Access: {access}"
+              }
+            });
+            searchGraphicsLayer.add(graphic);
+          }
+        });
+
+        // Query Obstacles
+        query = obstaclesLayer.createQuery();
+        query.geometry = circle;
+        query.spatialRelationship = "intersects";
+        query.returnGeometry = true;
+        query.outFields = ["*"];
+        const obstaclesResult = await obstaclesLayer.queryFeatures(query);
+        obstaclesResult.features.forEach(feature => {
+          const centroid = feature.geometry.centroid || feature.geometry;
+          if (isWithinRadius(centroid, lookoutPoint, radius)) {
+            const graphic = new Graphic({
+              geometry: feature.geometry,
+              symbol: {
+                type: "simple-line",
+                color: "#FF0000",
+                width: 3
+              },
+              attributes: feature.attributes,
+              popupTemplate: {
+                title: "{type}",
+                content: "Description: {description}"
               }
             });
             searchGraphicsLayer.add(graphic);
@@ -458,7 +562,7 @@
         query.outFields = ["*"];
         const lookoutResult = await lookoutsLayer.queryFeatures(query);
         lookoutResult.features.forEach(feature => {
-          if (feature.attributes.OBJECTID === selectedLookout.attributes.OBJECTID) return; // Skip the selected lookout
+          if (feature.attributes.OBJECTID === selectedLookout.attributes.OBJECTID) return;
           if (isWithinRadius(feature.geometry, lookoutPoint, radius)) {
             const graphic = new Graphic({
               geometry: feature.geometry,
@@ -494,12 +598,15 @@
         selectedLookout = null;
         searchGraphicsLayer.removeAll();
         document.getElementById("radiusSearchDiv").style.display = "none";
+        document.getElementById("parkingFilterDiv").style.display = "none";
         view.popup.close();
-        // Restore all layers
-        restaurantsDisabledLayer.visible = true;
-        restaurantsLayer.visible = true;
-        parkingLayer.visible = true;
+        // Restore default state (only lookouts visible)
+        restaurantsDisabledLayer.visible = false;
+        restaurantsLayer.visible = false;
+        parkingLayer.visible = false;
+        obstaclesLayer.visible = false;
         lookoutsLayer.visible = true;
+        parkingLayer.definitionExpression = "";
       });
 
       // Zoom to combined extent
@@ -508,12 +615,14 @@
           restaurantsDisabledLayer.when(),
           restaurantsLayer.when(),
           parkingLayer.when(),
+          obstaclesLayer.when(),
           lookoutsLayer.when()
-        ]).then(function([disabled, restaurants, parking, lookouts]) {
+        ]).then(function([disabled, restaurants, parking, obstacles, lookouts]) {
           const extents = [
             disabled.fullExtent,
             restaurants.fullExtent,
             parking.fullExtent,
+            obstacles.fullExtent,
             lookouts.fullExtent
           ].filter(extent => extent);
           if (extents.length > 0) {
